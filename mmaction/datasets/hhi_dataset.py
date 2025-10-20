@@ -10,7 +10,8 @@ from mmaction.evaluation import read_labelmap
 from mmaction.registry import DATASETS
 from mmaction.utils import ConfigType
 from .base import BaseActionDataset
-
+import json
+from copy import deepcopy as dc
 
 @DATASETS.register_module()
 class SportsHHIDataset(BaseActionDataset):
@@ -192,6 +193,12 @@ class SportsHHIDataset(BaseActionDataset):
         records_dict_by_img = defaultdict(list)
         bboxes_dict_by_img = defaultdict(list)
         fin = list_from_file(self.ann_file)
+        if 'val' in self.ann_file:
+            json_file=json.load(open('/home/wu_tian_ci/SportsHHI/dataset/annotations/val.json'))
+        elif 'train' in self.ann_file:
+            json_file=json.load(open('/home/wu_tian_ci/SportsHHI/dataset/annotations/train.json'))
+        else:
+            raise ValueError
         for line in fin:
             line_split = line.strip().split(',')
             # [vid, fid, x11, y11, x12, y12, x21, y21, x22, y22, label, p1, p2]
@@ -201,7 +208,8 @@ class SportsHHIDataset(BaseActionDataset):
                 if label not in self.custom_classes:
                     continue
                 label = self.custom_classes.index(label)
-
+            if label==0:
+                breakpoint()
             video_id = line_split[0]
             # line_split[1]: fid (NOT TIMESTAMP)
             timestamp = int(line_split[1]) // self._FPS
@@ -265,7 +273,69 @@ class SportsHHIDataset(BaseActionDataset):
                 fps=self._FPS,
                 ann=ann
             )
-            data_list.append(video_info)
+            tokens=json_file[video_id]
+            # k=0
+            len_t=len(tokens)
+            token_ind=np.random.randint(len_t)
+            token=tokens[token_ind]
+            vk=dc(video_info)
+            t=np.zeros(35, dtype=np.float32)
+            t[token['token']]=1.
+            vk['token']=t
+            val=token['val']
+            inv=token['inv']
+            si=vk['ann']['gt_interactions']
+            p=np.zeros_like(si)
+            c=np.zeros_like(si)
+            for i in range(si.shape[0]):
+                if len(val)>0:
+                    for v in val:
+                        ind=self.custom_classes.index(v)
+                        if si[i][ind] > 0.:
+                            c[i][ind]=1.
+                            p[i][0]=1.
+                            break
+                if len(inv)>0:
+                    for iv in inv:
+                        ind=self.custom_classes.index(iv)
+                        if si[i][ind]>0.:
+                            c[i][0]=1.
+                            p[i][ind]=1.
+                            break
+            vk['ann']['p_interactions']=p
+            vk['ann']['c_interactions']=c
+            data_list.append(vk)
+            # for token in tokens:
+            #     k+=1
+            #     if k==2:
+            #         break
+            #     vk=dc(video_info)
+            #     t=np.zeros(35, dtype=np.float32)
+            #     t[token['token']]=1.
+            #     vk['token']=t
+            #     val=token['val']
+            #     inv=token['inv']
+            #     si=vk['ann']['gt_interactions']
+            #     p=np.zeros_like(si)
+            #     c=np.zeros_like(si)
+            #     for i in range(si.shape[0]):
+            #         if len(val)>0:
+            #             for v in val:
+            #                 ind=self.custom_classes.index(v)
+            #                 if si[i][ind] > 0.:
+            #                     c[i][ind]=1.
+            #                     p[i][0]=1.
+            #                     break
+            #         if len(inv)>0:
+            #             for iv in inv:
+            #                 ind=self.custom_classes.index(iv)
+            #                 if si[i][ind]>0.:
+            #                     c[i][0]=1.
+            #                     p[i][ind]=1.
+            #                     break
+            #     vk['ann']['p_interactions']=p
+            #     vk['ann']['c_interactions']=c
+            #     data_list.append(vk)
 
         return data_list
     
@@ -304,5 +374,6 @@ class SportsHHIDataset(BaseActionDataset):
         data_info['gt_interactions'] = ann['gt_interactions']
         data_info['p1_ids'] = ann['p1_ids']
         data_info['p2_ids'] = ann['p2_ids']
-        
+        data_info['p_interactions'] = ann['p_interactions']
+        data_info['c_interactions'] = ann['c_interactions']
         return data_info

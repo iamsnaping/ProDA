@@ -1,5 +1,5 @@
-data_dir = 'DATASET_PATH'
-work_dir = 'CACHE_DIR'
+data_dir = '/home/wu_tian_ci/SportsHHI/dataset'
+work_dir = '/home/wu_tian_ci/SportsHHI/dataset'
 
 _base_ = ['./default_runtime.py']
 
@@ -92,7 +92,8 @@ train_pipeline = [
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='FormatShape', input_format='NCTHW', collapse=True),
-    dict(type='PackActionInputs', meta_keys=['scores', 'p1_ids', 'p2_ids', 'gt_interactions', 'img_shape', 'img_key', 'video_id', 'timestamp'])
+    dict(type='PackActionInputs', meta_keys=['scores', 'p1_ids', 'p2_ids', 'gt_interactions', 'img_shape', 'img_key', 'video_id', 'timestamp',
+                                             'p_interactions','c_interactions'])
 ]
 val_pipeline = [
     dict(
@@ -100,7 +101,8 @@ val_pipeline = [
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='FormatShape', input_format='NCTHW', collapse=True),
-    dict(type='PackActionInputs', meta_keys=['scores', 'p1_ids', 'p2_ids', 'gt_interactions', 'img_shape', 'img_key', 'video_id', 'timestamp'])
+    dict(type='PackActionInputs', meta_keys=['scores', 'p1_ids', 'p2_ids', 'gt_interactions', 'img_shape', 'img_key', 'video_id', 'timestamp',
+                                             'p_interactions','c_interactions'])
 ]
 
 train_dataloader = dict(

@@ -372,20 +372,24 @@ class VisionTransformer(BaseModule):
 
         x = x + pos_embed
         x = self.pos_drop(x)
-
+ 
         for blk in self.blocks:
             x = blk(x)
 
         x = self.norm(x)
 
         if self.return_feat_map:
+            # batch time h w embed_dims
             x = x.reshape(b, -1, h, w, self.embed_dims)
             x = x.permute(0, 4, 1, 2, 3)
+            # 8 768 2 16 28
+            # breakpoint()
             return x
 
         if self.fc_norm is not None:
+            
             return self.fc_norm(x.mean(1))
-
+        
         return x[:, 0]
 
 

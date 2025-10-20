@@ -50,10 +50,13 @@ def bbox_target(pos_bboxes_list: List[torch.Tensor],
 def hhi_target(pos_ind_list: List[torch.Tensor],
                neg_ind_list: List[torch.Tensor],
                label_list: List[torch.Tensor],
-               cfg: Union[dict, mmengine.ConfigDict]) -> tuple:
+               cfg: Union[dict, mmengine.ConfigDict],
+               p_label: List[torch.Tensor],
+               c_label: List[torch.Tensor]) -> tuple:
     """Generate relation targets for pairs
     """
     labels, label_weights = [], []
+    p_labels,c_labels=[],[]
     pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
 
     assert len(pos_ind_list) == len(neg_ind_list) == len(label_list)
@@ -63,18 +66,27 @@ def hhi_target(pos_ind_list: List[torch.Tensor],
         pos_inds = pos_ind_list[i]
         neg_inds = neg_ind_list[i]
         pos_label = label_list[i]
+        p_pos_labels=p_label[i]
+        c_pos_labels=c_label[i]
 
         num_pos = pos_inds.size(0)
         num_neg = neg_inds.size(0)
         num_samples = num_pos + num_neg
         label = F.pad(pos_label, (0,0,0,num_neg))
+        p_pos_label=F.pad(p_pos_labels,(0,0,0,num_neg))
+        c_pos_label=F.pad(c_pos_labels,(0,0,0,num_neg))
         label_weight = torch.zeros(num_samples, device=label.device)
         label_weight[:num_pos] = pos_weight
         label_weight[-num_neg:] = 1.
 
         labels.append(label)
         label_weights.append(label_weight)
-    
+        p_labels.append(p_pos_label)
+        c_labels.append(c_pos_label)
+
     labels = torch.cat(labels, 0)
+    p_labels=torch.cat(p_labels,0)
+    c_labels=torch.cat(c_labels,0)
+    
     label_weights = torch.cat(label_weights, 0)
-    return labels, label_weights
+    return labels,p_labels,c_labels, label_weights

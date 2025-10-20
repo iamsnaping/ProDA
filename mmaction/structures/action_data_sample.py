@@ -162,6 +162,22 @@ class ActionDataSample(BaseDataElement):
         """Deleter of `proposals`"""
         del self._proposals
 
+
+    @property
+    def token(self):
+        """Property of `token`"""
+        return self._token
+
+    @token.setter
+    def token(self, value):
+        """Setter of `token`"""
+        self.set_field(value, '_token', dtype=InstanceData)
+
+    @token.deleter
+    def token(self):
+        """Deleter of `token`"""
+        del self._token
+
     @property
     def gt_instances(self):
         """Property of `gt_instances`"""

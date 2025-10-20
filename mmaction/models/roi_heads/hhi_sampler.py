@@ -4,7 +4,7 @@ from mmdet.utils import util_mixins
 import numpy as np
 
 class HHISamplingResult(util_mixins.NiceRepr):
-    def __init__(self, pos_inds, neg_inds, p1_bbox_inds, p2_bbox_inds, pair_labels, bboxes):
+    def __init__(self, pos_inds, neg_inds, p1_bbox_inds, p2_bbox_inds, pair_labels, bboxes,tokens,p_labels,c_labels):
         self.pos_inds = pos_inds
         self.neg_inds = neg_inds
         self.pos_p1_bbox_inds = p1_bbox_inds[pos_inds]
@@ -13,6 +13,10 @@ class HHISamplingResult(util_mixins.NiceRepr):
         self.neg_p2_bbox_inds = p2_bbox_inds[neg_inds]
         self.pos_pair_labels = pair_labels[pos_inds]
         self.bboxes = bboxes
+        self.tokens=tokens
+        self.p_labels=p_labels[pos_inds]
+        self.c_labels=c_labels[pos_inds]
+
 
     @property
     def p1_bbox_inds(self):
@@ -48,6 +52,9 @@ class HHISamplingResult(util_mixins.NiceRepr):
             'neg_p2_bbox_inds': self.neg_p2_bbox_inds,
             'pos_pair_labels': self.pos_pair_labels,
             'bboxes': self.bboxes,
+            'token':self.tokens,
+            'p_label':self.p_labels,
+            'c_label':self.c_labels
         }
     
 class HHIBaseSampler(metaclass=ABCMeta):
@@ -80,11 +87,17 @@ class HHIBaseSampler(metaclass=ABCMeta):
                gt_p2_ids,
                gt_bboxes,
                gt_labels,
+               p_labels,
+               c_labels,
+               tokens,
                **kwargs):
         """Sample positive records
         """
         gt_labels = np.concatenate((gt_p1_ids.reshape(-1,1), gt_p2_ids.reshape(-1,1), gt_labels), axis=1)
         gt_labels = torch.from_numpy(gt_labels).to(dtype=gt_bboxes.dtype, device=gt_bboxes.device)
+        p_labels=torch.from_numpy(p_labels).to(dtype=gt_bboxes.dtype, device=gt_bboxes.device)
+        c_labels=torch.from_numpy(c_labels).to(dtype=gt_bboxes.dtype, device=gt_bboxes.device)
+        tokens=tokens.data.to(dtype=gt_bboxes.dtype, device=gt_bboxes.device)
 
         bboxes = bboxes.priors
         if len(bboxes.shape) < 2:
@@ -108,9 +121,9 @@ class HHIBaseSampler(metaclass=ABCMeta):
             gt_flags = torch.cat([gt_ones, gt_flags])
         
         num_bboxes = len(bboxes)
-        bbox_inds = torch.tensor([i for i in range(num_bboxes)])
-        p1_bbox_inds = torch.cat([bbox_ind.repeat(num_bboxes) for bbox_ind in bbox_inds], 0)
-        p2_bbox_inds = bbox_inds.repeat(num_bboxes)
+        bbox_inds = torch.tensor([i for i in range(num_bboxes)]).to(bboxes.device)
+        p1_bbox_inds = torch.cat([bbox_ind.repeat(num_bboxes) for bbox_ind in bbox_inds], 0).to(bboxes.device)
+        p2_bbox_inds = bbox_inds.repeat(num_bboxes).to(bboxes.device)
 
         p1_inds = torch.cat([i.repeat(num_bboxes) for i in assign_result.gt_inds])
         p2_inds = assign_result.gt_inds.repeat(num_bboxes)
@@ -122,12 +135,16 @@ class HHIBaseSampler(metaclass=ABCMeta):
 
         assign_gt_record_inds = torch.zeros(num_bboxes * num_bboxes, device=gt_labels.device)
         pair_labels = torch.zeros((num_bboxes*num_bboxes, gt_labels.shape[1]-2), device=gt_labels.device)
+        p_labels_=torch.zeros((num_bboxes*num_bboxes, gt_labels.shape[1]-2), device=p_labels.device)
+        c_labels_=torch.zeros((num_bboxes*num_bboxes, gt_labels.shape[1]-2), device=c_labels.device)
         for i in range(len(gt_labels)):
             row = gt_labels[i]
             p1, p2 = row[0]+1, row[1]+1
             inds = torch.nonzero(torch.logical_and(p1_inds==p1, p2_inds==p2))
             assign_gt_record_inds[inds] = i + 1
             pair_labels[inds] = row[2:]
+            p_labels_[inds]=p_labels[i]
+            c_labels_[inds]=c_labels[i]
         
         # num_pairs = self.num * self.num
         num_expected_pos = int(self.num * self.num * self.pos_fraction)
@@ -147,7 +164,7 @@ class HHIBaseSampler(metaclass=ABCMeta):
         )
         neg_inds = neg_inds.unique()
         
-        return HHISamplingResult(pos_inds, neg_inds, p1_bbox_inds, p2_bbox_inds, pair_labels, bboxes)
+        return HHISamplingResult(pos_inds, neg_inds, p1_bbox_inds, p2_bbox_inds, pair_labels, bboxes,tokens,p_labels_,c_labels_)
     
 
 class HHIRandomSampler(HHIBaseSampler):

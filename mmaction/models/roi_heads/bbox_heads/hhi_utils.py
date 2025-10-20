@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import copy
+import torch.nn.functional as F
 
 
 def my_minmax(input: torch.Tensor, zero_mat: torch.Tensor, one_mat: torch.Tensor) -> torch.Tensor:
@@ -111,13 +112,14 @@ class TransformerEncoder(nn.Module):
 
 class transformer(nn.Module):
     
-    def __init__(self, enc_layer_num=1, embed_dim=1792, nhead=8, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, enc_layer_num=1, embed_dim=1792, nhead=8, dim_feedforward=5376, dropout=0.1):
         super().__init__()
         encoder_layer = TransformerEncoderLayer(
             embed_dim=embed_dim, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout)
         self.encoder_layers = TransformerEncoder(encoder_layer, enc_layer_num)
 
     def forward(self, features, im_idx):
+        
         l = torch.sum(im_idx == torch.mode(im_idx)[0])
         b = int(im_idx[-1] + 1)
         rel_input = torch.zeros([l, b, features.shape[1]]).to(features.device)
@@ -130,3 +132,147 @@ class transformer(nn.Module):
         enc_output = (enc_output.permute(1,0,2)).contiguous().view(-1, features.shape[1])[masks.view(-1)==0]
 
         return enc_output, attention_weights
+
+
+class GPFPlus(nn.Module):
+# flag =true -> nn.embeding else linear
+    def __init__(self,):
+        super().__init__()
+        self.tokens=nn.Linear(35,10*1792)
+        self.ptokens=nn.Linear(35,1792)
+        self.norm=nn.LayerNorm(1792)
+
+        self.net=nn.Sequential(nn.Linear(1792,10),nn.Sigmoid())
+    def forward(self,X,task_id):
+        n,b,d=X.shape
+        task_id=task_id.unsqueeze(0).repeat(n,1,1)
+        task_token=self.norm(self.ptokens(task_id)+X)
+        weight=self.net(task_token).unsqueeze(-2)
+        prompt=self.tokens(task_id).reshape(n,b,10,1792)
+        prompt=weight@prompt
+        prompt=prompt.squeeze(-2)
+        return X+prompt
+
+class FFN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1=nn.Sequential(nn.Linear(1792,2048),nn.LayerNorm(2048),nn.GELU(),nn.Linear(2048,1792))
+        self.norm=nn.LayerNorm(1792)
+    
+    def forward(self,X):
+        skip=self.layer1(X)
+        return self.norm(X+skip)
+
+class proda_layer(nn.Module):
+    def __init__(self, enc_layer_num=1, embed_dim=1792, nhead=8, dim_feedforward=2048, dropout=0.1):
+        super().__init__()
+        encoder_layer = TransformerEncoderLayer(
+            embed_dim=embed_dim, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout)
+        self.encoder_layers = TransformerEncoder(encoder_layer, enc_layer_num)
+        self.prompt1=GPFPlus()
+        self.prompt2=GPFPlus()
+        # self.ffn1=FFN()
+        # self.ffn2=FFN()
+
+    
+    def forward(self,X,task_id,mask,pt_):
+        if pt_==1:
+            # X=self.ffn1(self.prompt1(X,task_id))
+            rel,_= self.encoder_layers(self.prompt1(X,task_id),mask)
+        elif pt_==2:
+            # X=self.ffn2(self.prompt2(X,task_id))
+            rel,_= self.encoder_layers(self.prompt2(X,task_id),mask)
+        else:
+            raise ValueError
+        return rel
+
+
+class proda(nn.Module):
+    
+    def __init__(self, enc_layer_num=3, embed_dim=1792, nhead=8, dim_feedforward=2048, dropout=0.1):
+        super().__init__()
+        self.blocks=nn.ModuleList()
+
+        for i in range(enc_layer_num):
+            self.blocks.append(proda_layer(1, embed_dim, nhead, dim_feedforward, dropout))
+
+    def forward(self, features, im_idx,task_id,pt_):
+        
+        l = torch.sum(im_idx == torch.mode(im_idx)[0])
+        b = int(im_idx[-1] + 1)
+        rel_input = torch.zeros([l, b, features.shape[1]]).to(features.device)
+        masks = torch.zeros([b, l], dtype=bool).to(features.device)
+        for i in range(b):
+            rel_input[:torch.sum(im_idx==i), i, :] = features[im_idx==i]
+            masks[i, torch.sum(im_idx==i):] = True
+
+        # enc_output, attention_weights = self.encoder_layers(rel_input, masks)
+        for layer in self.blocks:
+            rel_input=layer(rel_input,task_id,masks,pt_)
+
+        enc_output = (rel_input.permute(1,0,2)).contiguous().view(-1, features.shape[1])[masks.view(-1)==0]
+
+        return enc_output
+
+
+class GateFusion(nn.Module):
+    def __init__(self,dropout=0.1):
+        super().__init__()
+        self.share_score=nn.Sequential(nn.Linear(1792*2,1792),nn.GELU(),nn.Dropout(dropout)
+                                        ,nn.Linear(1792,1792//4),nn.LayerNorm(1792//4),nn.GELU())
+        self.score1=nn.Sequential(nn.Dropout(dropout),nn.Linear(1792//4,1),nn.Sigmoid())
+
+    
+    def forward(self,X1,X2):
+
+        X=torch.cat([X1,X2],dim=-1)
+        share_f=self.share_score(X)
+        score1=self.score1(share_f)
+        return X1*score1+(1-score1)*X2
+
+
+class ReconstructNetwork(nn.Module):
+
+    def __init__(self,dim=1792,dropout=0.1,eps=1,layer=3):
+        super().__init__()
+        self.layer=MLPs(dim,dropout,eps,layer)
+    
+    def forward(self,X):
+        return self.layer(X)
+        # return self.layer2(self.layer1(X))
+
+
+class MLPs(nn.Module):
+    def __init__(self,in_dim,dropout,eps,layer=3):
+        super().__init__()
+        self.lin=nn.ModuleList()
+        for i in range(layer-1):
+            self.lin.append(Linear(in_dim,in_dim,dropout,eps))
+        self.lin.append(Linear(in_dim,in_dim,dropout,eps,True))
+    def forward(self,X):
+        for layer in self.lin:
+            X=layer(X)
+        return X
+
+class Linear(nn.Module):
+    def __init__(self,in_dim,out_dim,dropout,eps,norm=False):
+        super().__init__()
+        self.norm=norm
+        if norm: 
+            self.lin=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,out_dim),nn.LayerNorm(out_dim,eps=eps),nn.GELU())
+        else:
+            self.lin=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,out_dim),nn.GELU())
+    def forward(self,X):
+        return self.lin(X)
+
+def dis_loss(x1,x2):
+    x1_mean=torch.mean(x1,-1,True)
+    x2_mean=torch.mean(x2,-1,True)
+    x1=x1-x1_mean
+    x2=x2-x2_mean
+
+    margin=0.4
+    sigma1=torch.sqrt(torch.mean(x1.pow(2)))
+    sigma2=torch.sqrt(torch.mean(x2.pow(2)))
+    corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-margin)
+    return corr

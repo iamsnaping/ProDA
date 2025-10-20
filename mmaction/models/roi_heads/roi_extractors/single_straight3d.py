@@ -97,6 +97,7 @@ class SingleRoIExtractor3D(nn.Module):
                 - roi_feats (Tensor): Extracted bbox RoI features.
                 - feat (Tensor): Global features of the video clip.
         """
+
         if not isinstance(feat, tuple):
             feat = (feat, )
 
@@ -105,7 +106,7 @@ class SingleRoIExtractor3D(nn.Module):
             max_shape = (maxT, ) + feat[0].shape[3:]
             # resize each feat to the largest shape (w. nearest)
             feat = [F.interpolate(x, max_shape).contiguous() for x in feat]
-
+        
         if self.with_temporal_pool:
             if self.temporal_pool_mode == 'avg':
                 feat = [torch.mean(x, 2, keepdim=True) for x in feat]
@@ -129,6 +130,7 @@ class SingleRoIExtractor3D(nn.Module):
             roi_feats.append(roi_feat)
 
         roi_feats = torch.stack(roi_feats, dim=2)
+
         return roi_feats, feat
 
 

@@ -8,5 +8,5 @@ GPUS=$2
 PORT=${PORT:-29567}
 
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nnodes=$NNODES --node_rank=$NODE_RANK --master_addr=$MASTER_ADDR \
-    --nproc_per_node=$GPUS --master_port=44148 $(dirname "$0")/train.py $CONFIG --launcher pytorch ${@:3}
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NNODES --node_rank=$NODE_RANK --master_addr=$MASTER_ADDR \
+    --nproc_per_node=$GPUS --master_port=44148 $(dirname "$0")/train.py $CONFIG --launcher pytorch ${@:3} 

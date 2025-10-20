@@ -89,7 +89,10 @@ if mmdet_imported:
                     data_sample.p1_ids,
                     data_sample.p2_ids,
                     data_sample.gt_instances.bboxes,
-                    data_sample.gt_interactions
+                    data_sample.gt_interactions,
+                    data_sample.p_interactions,
+                    data_sample.c_interactions,
+                    data_sample.token
                 )
                 sampling_results.append(sampling_result)
 
@@ -108,23 +111,32 @@ if mmdet_imported:
             p2_bbox_inds = []
             prev_bbox_cnt = 0
             union_bbox_list = []
+            tokens=[]
             for batch_id in range(len(sampling_results)):
                 p1_bbox_inds.append(sampling_results[batch_id].p1_bbox_inds + prev_bbox_cnt)
                 p2_bbox_inds.append(sampling_results[batch_id].p2_bbox_inds + prev_bbox_cnt)
                 prev_bbox_cnt += len(sampling_results[batch_id].bboxes)
                 p1_bboxes = sampling_results[batch_id].bboxes[sampling_results[batch_id].p1_bbox_inds]
                 p2_bboxes = sampling_results[batch_id].bboxes[sampling_results[batch_id].p2_bbox_inds]
+                tokens.append(sampling_results[batch_id].tokens)
                 union_bboxes = bboxes2union(p1_bboxes, p2_bboxes)
                 union_bbox_list.append(union_bboxes)
             p1_bbox_inds = torch.cat(p1_bbox_inds)
             p2_bbox_inds = torch.cat(p2_bbox_inds)
+            tokens=torch.stack(tokens)
 
             union_rois = bbox2roi(union_bbox_list)
-
-            bbox_results = self._bbox_forward(x, rois, p1_bbox_inds, p2_bbox_inds, union_rois)
+            
+            bbox_results = self._bbox_forward(x, rois, p1_bbox_inds, p2_bbox_inds, union_rois,tokens)
 
             bbox_loss_and_target = self.bbox_head.loss_and_target(
                 cls_score=bbox_results['cls_score'],
+                com_score=bbox_results['com_score'],
+                pri_score=bbox_results['pri_score'],
+                x_in=bbox_results['x_in'],
+                recs=bbox_results['recs'],
+                x_com=bbox_results['x_com'],
+                x_pri=bbox_results['x_pri'],
                 rois=rois,
                 sampling_results=sampling_results,
                 rcnn_train_cfg=self.train_cfg)
@@ -132,17 +144,24 @@ if mmdet_imported:
             bbox_results.update(loss_bbox=bbox_loss_and_target['loss_bbox'])
             return bbox_results
 
-        def _bbox_forward(self, x, rois, p1_bbox_inds, p2_bbox_inds, union_rois, test=False) -> dict:
+        def _bbox_forward(self, x, rois, p1_bbox_inds, p2_bbox_inds, union_rois,tokens, test=False) -> dict:
             roi_feat, _ = self.bbox_roi_extractor(x, rois)
             union_roi_feat, _ = self.bbox_roi_extractor(x, union_rois)
 
             if self.with_shared_head:
                 raise NotImplementedError('No shared head allowd for Relation Dataset')
-
-            cls_score = self.bbox_head(rois, roi_feat, p1_bbox_inds, p2_bbox_inds, union_roi_feat)
+            # breakpoint()
+            cls_score,com_score,pri_score,x_in,recs,x_com,x_pri = self.bbox_head(rois, roi_feat, p1_bbox_inds, p2_bbox_inds, union_roi_feat,tokens)
 
             bbox_results = dict(
-                cls_score=cls_score, bbox_feats=None)
+                cls_score=cls_score,
+                com_score=com_score,
+                pri_score=pri_score,
+                x_in=x_in,
+                recs=recs,
+                x_com=x_com,
+                x_pri=x_pri,
+                bbox_feats=None)
             return bbox_results
         
         def bbox_loss(self, x: Union[Tensor, Tuple[Tensor]],
@@ -185,6 +204,7 @@ if mmdet_imported:
             batch_img_metas = [
                 data_sample.metainfo for data_sample in data_samples
             ]
+            batch_tokens=[datasample.token.data for datasample in data_samples]
 
             if isinstance(x, tuple):
                 x_shape = x[0].shape
@@ -197,6 +217,7 @@ if mmdet_imported:
             results_list = self.predict_bbox(
                 x,
                 batch_img_metas,
+                batch_tokens,
                 rpn_results_list,
                 rcnn_test_cfg=self.test_cfg)
             
@@ -204,6 +225,7 @@ if mmdet_imported:
         
         def predict_bbox(self, x: Tuple[Tensor],
                          batch_img_metas: List[dict],
+                         tokens:List[Tensor],
                          rpn_results_list: InstanceList,
                          rcnn_test_cfg: ConfigType) -> InstanceList:
             assert len(rpn_results_list) == 1
@@ -213,13 +235,13 @@ if mmdet_imported:
             num_bboxes = len(proposals[0])
             bbox_inds = torch.tensor([i for i in range(num_bboxes)])
             p1_bbox_inds = torch.cat([bbox_ind.repeat(num_bboxes) for bbox_ind in bbox_inds], 0)
+            tokens=torch.stack(tokens)
             p2_bbox_inds = bbox_inds.repeat(num_bboxes)
             bbox_union_list = [bboxes2union(proposals[0][p1_bbox_inds], proposals[0][p2_bbox_inds])]
-
             rois = bbox2roi(proposals)
             union_rois = bbox2roi(bbox_union_list)
 
-            bbox_results = self._bbox_forward(x, rois, p1_bbox_inds, p2_bbox_inds, union_rois, test=True)
+            bbox_results = self._bbox_forward(x, rois, p1_bbox_inds, p2_bbox_inds, union_rois,tokens, test=True)
 
             cls_scores = bbox_results['cls_score']
             num_proposals_per_img = tuple(len(p) for p in proposals)

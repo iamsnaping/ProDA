@@ -6,7 +6,9 @@ import os.path as osp
 
 from mmengine.config import Config, DictAction
 from mmengine.runner import Runner
-
+from mmengine.registry import MODELS
+from mmengine.analysis import get_model_complexity_info
+from fvcore.nn import parameter_count
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a hhi recognizer')
@@ -121,6 +123,11 @@ def main():
     args = parse_args()
 
     cfg = Config.fromfile(args.config)
+    # model=MODELS.build(cfg.model)
+    # model.eval()
+    # params = parameter_count(model)
+    # print(f"{params[''] / 1e6:.2f} M")
+    # breakpoint()
 
     # merge cli arguments to config
     cfg = merge_args(cfg, args)
@@ -134,3 +141,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    

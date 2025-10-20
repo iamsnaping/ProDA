@@ -11,7 +11,7 @@ def bbox2result_hhi(bboxes, p1_inds, p2_inds, labels, num_classes, thr=0.01):
 
     p1_boxes = p1_boxes.cpu().numpy()
     p2_boxes = p2_boxes.cpu().numpy()
-    scores = labels.cpu().numpy()  # rename for clarification
+    scores = labels.cpu().numpy()  # rename for classification
     assert p1_boxes.shape[0] == scores.shape[0]
     assert p1_boxes.shape[0] == p2_boxes.shape[0]
 

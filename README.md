@@ -1,42 +1,135 @@
-# SportsHHI
+---
+annotations_creators:
+- crowdsourced
+language:
+- en
+language_creators:
+- expert-generated
+license:
+- cc-by-nc-4.0
+multilinguality:
+- monolingual
+pretty_name: SportsHHI
+size_categories: []
+source_datasets:
+- original
+tags:
+- video
+- video relation detection
+- human-human interaction detection
+task_categories:
+- image-classification
+- object-detection
+- other
+task_ids:
+- multi-class-image-classification
+extra_gated_heading: "Acknowledge license to accept the repository"
+extra_gated_prompt: "This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License"
+extra_gated_fields:
+  Institute: text
+  I want to use this dataset for:
+    type: select
+    options:
+      - Research
+      - Education
+      - label: Other
+        value: other
+  I agree to use this dataset for non-commerical use ONLY: checkbox
 
-This is the official repository of the CVPR 2024 paper [**SportsHHI: A Dataset for Human-Human Interaction Detection in Sports Videos**](https://arxiv.org/abs/2404.04565).
+---
 
-## Download
+# Dataset Card for SportsHHI
 
-[SportsHHI Dataset](https://huggingface.co/datasets/MCG-NJU/SportsHHI)
+## Table of Contents
+- [Table of Contents](#table-of-contents)
+- [Dataset Description](#dataset-description)
+  - [Dataset Summary](#dataset-summary)
+  - [Supported Tasks and Leaderboards](#supported-tasks-and-leaderboards)
+  - [Languages](#languages)
+- [Dataset Structure](#dataset-structure)
+  - [Data Splits](#data-splits)
+- [Dataset Creation](#dataset-creation)
+  - [Curation Rationale](#curation-rationale)
+  - [Source Data](#source-data)
+  - [Annotations](#annotations)
+- [Additional Information](#additional-information)
+  - [Dataset Curators](#dataset-curators)
+  - [Licensing Information](#licensing-information)
+  - [Citation Information](#citation-information)
 
-## Baseline Method & Evaluation
+## Dataset Description
 
-### Environment setup
+- **Repository:** https://github.com/MCG-NJU/SportsHHI
+- **Paper:** https://arxiv.org/abs/2404.04565
+- **Point of Contact:** mailto: runyu_he@smail.nju.edu.cn
 
-```
-conda create --name sports_hhi python=3.8 -y
-conda activate sports_hhi
-conda install pytorch==1.12.1 torchvision==0.13.1 cudatoolkit=10.2 -c pytorch  # **This** command will automatically install the latest version PyTorch and cudatoolkit, please check whether they match your environment.
-pip install -U openmim
-mim install mmengine
-mim install mmcv==2.0.0
-mim install mmdet
-pip install einops
-pip install numpy==1.23.5
-```
+### Dataset Summary
 
-### Training & Testing
+SportsHHI is a dataset for video human-human interaction detection. Please refer to [SportsHHI: A Dataset for Human-Human Interaction Detection in Sports Videos](https://arxiv.org/abs/2404.04565) for more details. Please refer to [this repository](https://github.com/MCG-NJU/SporsHHI) for training and evaluation.
 
-We provide the training and testing code for our baseline method. Please first specify ```data_dir``` and ```work_dir``` in configuration files in ```configs``` folder.
+### Supported Tasks and Leaderboards
 
-For training, run ```bash train.sh $CONFIG $GPU_NUM```. ```$CONFIG``` should be a configuration file in ```configs``` folder. ```$GPU_NUM``` should be the number of gpus for training.
+- `Human-Human Interaction Detection`
 
-For testing, run ```bash test.sh $CONFIG $CHECKPOINT $GPU_NUM```. ```$CONFIG``` should be a configuration file in ```configs``` folder. ```$CHECKPOINT``` is the checkpoint to test. ```$GPU_NUM``` should be the number of gpus for training.
+Details about training and evaluation can be found in the [GitHub Repository](https://github.com/mcG-NJU/SportsHHI).
 
-## Acknowledgments
+### Languages
 
-Our implementation of baseline method is developed based on the [mmaction2](https://github.com/open-mmlab/mmaction2/) repository.
+The class labels in the dataset are in English.
 
-## Citation
+## Dataset Structure
 
-If you find our code or paper useful, please cite as
+The dataset contains ```frames.zip``` and ```annotations```.
+
+```frames.zip``` contains extracted video frames.
+
+```annotations``` contains annotaions about human boxes, interactions, and interaction classes.
+
+If you have any network issues, please refer to ```pan.txt``` for data downloading.
+
+### Data Splits
+
+|             |train  |validation|
+|-------------|------:|---------:|
+|# of tubes   |38527  |12122     |
+
+## Dataset Creation
+
+### Curation Rationale
+
+comprehending high-level inter- actions between humans is crucial for understanding com- plex multi-person videos, such as sports and surveillance videos. To address this issue, authors propose a new video visual relation detection task: video human-human interaction detection, and build a dataset named SportsHHI for it.
+
+### Source Data
+
+#### Initial Data Collection and Normalization
+
+> We carefully selected 80 basketball and 80 volleyball videos from the MultiSports dataset to cover various types of games including men’s, women’s, national team, and club games. The average length of the videos is 603 frames and the frame rate of the videos is 25FPS. All videos have a high resolution of 720P.
+
+### Annotations
+
+Please refer to [SportsHHI: A Dataset for Human-Human Interaction Detection in Sports Videos](https://arxiv.org/abs/2404.04565) for more information.
+
+## Additional Information
+
+### Dataset Curators
+
+Authors of [SportsHHI: A Dataset for Human-Human Interaction Detection in Sports Videos](https://arxiv.org/abs/2404.04565)
+
+- Tao Wu
+
+- Runyu He
+
+- Gangshan Wu
+
+- Limin Wang
+
+### Licensing Information
+
+<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a>.
+
+### Citation Information
+
+If you find this dataset useful, please cite as
 
 ```
 @misc{wu2024sportshhi,

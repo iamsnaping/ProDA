@@ -8,7 +8,7 @@ from mmengine.config import ConfigDict
 from mmengine.structures import InstanceData
 from torch import Tensor
 
-from .hhi_utils import transformer, boxes2union
+from .hhi_utils import transformer, boxes2union,proda,GateFusion,ReconstructNetwork,dis_loss
 from ..hhi_sampler import HHISamplingResult
 
 from mmaction.structures.bbox import hhi_target
@@ -116,13 +116,17 @@ class BBoxHeadHHI(nn.Module):
         self.p1_fc = nn.Linear(in_channels, 512)
         self.p2_fc = nn.Linear(in_channels, 512)
         self.vr_fc = nn.Linear(in_channels, 512)
+        self.recs=ReconstructNetwork(dim=1792,dropout=0.1,eps=1,layer=3)
+        self.gatefusion=GateFusion(dropout_ratio)
 
         if self.use_attention:
             if self.use_spatial:
-                self.transformer = transformer(enc_layer_num=1, embed_dim=1792, dropout=dropout_ratio)
+                # self.transformer = transformer(enc_layer_num=1, embed_dim=1792, dropout=dropout_ratio)
+                self.transformer=proda(enc_layer_num=1, embed_dim=1792, dropout=dropout_ratio)
             else:
-                self.transformer = transformer(enc_layer_num=1, embed_dim=1536, dropout=dropout_ratio)
-
+                # self.transformer = transformer(enc_layer_num=1, embed_dim=1536, dropout=dropout_ratio)
+                self.transformer=proda(enc_layer_num=1, embed_dim=1536, dropout=dropout_ratio)
+        
         if self.use_spatial:
             cls_in_channels = 1792
         else:
@@ -130,11 +134,24 @@ class BBoxHeadHHI(nn.Module):
         if mlp_head:
             self.fc_cls = nn.Sequential(
                 nn.Linear(cls_in_channels, cls_in_channels),
-                nn.ReLU(),
+                nn.GELU(),
                 nn.Linear(cls_in_channels, num_classes)
+            )
+            self.p_cls = nn.Sequential(
+                nn.Linear(cls_in_channels, cls_in_channels),
+                nn.GELU(),
+                nn.Linear(cls_in_channels, num_classes+1)
+            )
+            self.c_cls = nn.Sequential(
+                nn.Linear(cls_in_channels, cls_in_channels),
+                nn.GELU(),
+                nn.Linear(cls_in_channels, num_classes+1)
             )
         else:
             self.fc_cls = nn.Linear(cls_in_channels, num_classes)
+            self.pj=nn.Sequential(nn.Linear(cls_in_channels,cls_in_channels),nn.LayerNorm(cls_in_channels),nn.GELU())
+            self.p_cls = nn.Linear(cls_in_channels, num_classes+1)
+            self.c_cls = nn.Linear(cls_in_channels, num_classes+1)
 
     def init_weights(self) -> None:
         """Initialize the classification head."""
@@ -143,7 +160,8 @@ class BBoxHeadHHI(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, rois, x, p1_inds, p2_inds, x_union) -> Tensor:
+    def forward(self, rois, x, p1_inds, p2_inds, x_union,token) -> Tensor:
+        
         if self.dropout_before_pool and self.dropout_ratio > 0:
             x = self.dropout(x)
             x_union = self.dropout(x_union)
@@ -152,7 +170,6 @@ class BBoxHeadHHI(nn.Module):
         x_union = self.temporal_pool(x_union)
         x = self.spatial_pool(x)
         x_union = self.spatial_pool(x_union)
-
         if not self.dropout_before_pool and self.dropout_ratio > 0:
             x = self.dropout(x)
             x_union = self.dropout(x_union)
@@ -175,13 +192,32 @@ class BBoxHeadHHI(nn.Module):
             x_in = torch.cat([p1_rep, p2_rep, vr_rep, spatial_enc], 1)
         else:
             x_in = torch.cat([p1_rep, p2_rep, vr_rep], 1)
-
+            
         if self.use_attention:
             im_idx = rois[:, 0][p1_inds]
-            x_in, _ = self.transformer(x_in, im_idx)
-        
-        cls_score = self.fc_cls(x_in)
-        return cls_score
+            task_id2=(~token.bool()).float()
+            # common
+            x_com= self.transformer(x_in, im_idx,token,1)
+            x_pri=self.transformer(x_in,im_idx,task_id2,2)
+            out_x=self.gatefusion(x_com,x_pri)
+        if self.training:
+            recs=self.recs(out_x)
+        else:
+            recs=torch.tensor([0],device=out_x.device)
+        cls_score = self.fc_cls(self.pj(out_x))
+        com_score=self.c_cls(x_com)
+        pri_score=self.p_cls(x_pri)
+        return cls_score,com_score,pri_score,x_in,recs,x_com,x_pri
+
+        # if self.use_attention:
+        #     im_idx = rois[:, 0][p1_inds]
+
+        #     x_in,_= self.transformer(x_in, im_idx)
+
+        # cls_score = self.fc_cls(x_in)
+
+
+        # return cls_score,torch.tensor([0]),torch.tensor([0]),x_in,torch.tensor([0]),torch.tensor([0]),torch.tensor([0])
     
     @staticmethod
     def get_targets(sampling_results: List[HHISamplingResult],
@@ -189,7 +225,9 @@ class BBoxHeadHHI(nn.Module):
         pos_ind_list = [res.pos_inds for res in sampling_results]
         neg_ind_list = [res.neg_inds for res in sampling_results]
         label_list = [res.pos_pair_labels for res in sampling_results]
-        cls_reg_targets = hhi_target(pos_ind_list, neg_ind_list, label_list, rcnn_train_cfg)
+        p_label=[res.p_labels for res in sampling_results]
+        c_label=[res.c_labels for res in sampling_results]
+        cls_reg_targets = hhi_target(pos_ind_list, neg_ind_list, label_list, rcnn_train_cfg,p_label,c_label)
         return cls_reg_targets
     
     @staticmethod
@@ -241,11 +279,18 @@ class BBoxHeadHHI(nn.Module):
         # Return all
         return recall_thr, prec_thr, recalls_k, precs_k
     
-    def loss_and_target(self, cls_score: Tensor, rois: Tensor,
+    def loss_and_target(self, cls_score: Tensor, 
+                        com_score: Tensor,
+                        pri_score: Tensor,
+                        x_in: Tensor,
+                        recs: Tensor,
+                        x_com: Tensor,
+                        x_pri: Tensor,
+                        rois: Tensor,
                         sampling_results: List[HHISamplingResult],
                         rcnn_train_cfg: ConfigDict, **kwargs) -> dict:
         cls_targets = self.get_targets(sampling_results, rcnn_train_cfg)
-        labels, _ = cls_targets
+        labels,p_labels,c_labels, _ = cls_targets
 
         losses = dict()
         # Only use the cls_score
@@ -254,6 +299,13 @@ class BBoxHeadHHI(nn.Module):
             pos_inds = torch.sum(labels, dim=-1) > 0
             cls_score = cls_score[pos_inds, 1:]
             labels = labels[pos_inds]
+
+            com_score=com_score[pos_inds,1:]
+            pri_score=pri_score[pos_inds,1:]
+            p_pos_inds=torch.sum(p_labels,dim=-1)>0
+            c_pos_inds=torch.sum(c_labels,dim=-1)>0
+            p_labels=p_labels[p_pos_inds]
+            c_labels=c_labels[c_pos_inds]
 
             # Compute First Recall/Precisions
             #   This has to be done first before normalising the label-space.
@@ -272,16 +324,32 @@ class BBoxHeadHHI(nn.Module):
 
             # Select Loss function based on single/multi-label
             #   NB. Both losses auto-compute sigmoid/softmax on prediction
+            # breakpoint()
             if self.multilabel:
+                
                 loss_func = F.binary_cross_entropy_with_logits
             else:
                 loss_func = cross_entropy_loss
-
-            # Compute loss
+            loss_r=nn.MSELoss(reduction='none')
+            # breakpoint()
             loss = loss_func(cls_score, labels, reduction='none')
+
             pt = torch.exp(-loss)
+
+            loss_c=loss_func(com_score,c_labels,reduction='none')
+            loss_p=loss_func(pri_score,p_labels,reduction='none')
+            p_pt=torch.exp(-loss_p)
+            c_pt=torch.exp(-loss_c)
             F_loss = self.focal_alpha * (1 - pt)**self.focal_gamma * loss
+            F_loss_p=self.focal_alpha*(1-p_pt)**self.focal_gamma*loss_p
+            F_loss_c=self.focal_alpha*(1-c_pt)**self.focal_gamma*loss_c
+            F_loss_s=dis_loss(x_com,x_pri)
+            F_loss_r=F.relu(torch.mean(loss_r(x_in,recs))-0.3)
             losses['loss_hhi_cls'] = torch.mean(F_loss)
+            losses['loss_p']=torch.mean(F_loss_p)*0.1
+            losses['loss_c']=torch.mean(F_loss_c)
+            losses['loss_r']=F_loss_r
+            losses['loss_s']=F_loss_s
 
         return dict(loss_bbox=losses, bbox_targets=cls_targets)
     

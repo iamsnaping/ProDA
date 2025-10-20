@@ -94,6 +94,8 @@ class PackActionInputs(BaseTransform):
                 data_sample.proposals = InstanceData(
                     bboxes=to_tensor(results['proposals']))
 
+        if 'token' in results:
+            data_sample.token=InstanceData(data=to_tensor(results['token']))
         if 'label' in results:
             label_data = LabelData()
             label_data.item = to_tensor(results['label'])
@@ -102,6 +104,7 @@ class PackActionInputs(BaseTransform):
         img_meta = {k: results[k] for k in self.meta_keys if k in results}
         data_sample.set_metainfo(img_meta)
         packed_results['data_samples'] = data_sample
+
         return packed_results
 
     def __repr__(self) -> str:
